@@ -108,11 +108,6 @@ export class SlotMachine {
     return grid;
   }
 
-  /**
-   * Generate a bonus-game grid with:
-   *  - ≤1 FS (bell) per column
-   *  - NO FS on cells that already have a wild (wilds[r][c] > 0)
-   */
   generateGridForBonus(wilds: number[][]): SymbolId[][] {
     const rows = this.config.rows;
     const cols = this.config.reels;
@@ -136,14 +131,6 @@ export class SlotMachine {
     return grid;
   }
 
-  /**
-   * Score grid with left-to-right rules:
-   * - Horizontal (start at col 0)
-   * - Diagonal down-right (start col 0)
-   * - Diagonal up-right (start col 0)
-   * Wild multipliers (if provided) are overlayed: any wild cell matches target symbol
-   * and multiplies the line payout by its multiplier (stacking).
-   */
   scoreGrid(
     grid: SymbolId[][],
     betCents: number,

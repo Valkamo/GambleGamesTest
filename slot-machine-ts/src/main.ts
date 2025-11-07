@@ -205,7 +205,7 @@ function showWins(lineWins: LineWin[]): void {
 
 async function animateColumnsThenResolve(
   grid: SymbolId[][],
-  spinMs = 600,
+  spinMs = 1200,
   delayBetween = 140,
   wilds?: number[][]
 ): Promise<void> {
@@ -445,7 +445,7 @@ async function onSpinClick(): Promise<void> {
     machine.setBetCents(Number(betEl.value));
     const result = machine.spin();
 
-    await animateColumnsThenResolve(result.grid, 600, 140);
+    await animateColumnsThenResolve(result.grid, 1200, 140);
     lastWinEl.textContent = formatEuro(result.totalWinCents);
     showWins(result.lineWins);
     updateUIFromWallet();

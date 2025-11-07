@@ -1,0 +1,145 @@
+Slot Machine Project Overview
+=============================
+
+This document summarizes how your TypeScript slot machine project is structured, what each file does, and where you can tweak the gameplay, visuals, and logic.
+
+--------------------------------------
+Project Structure
+--------------------------------------
+
+index.html
+-----------
+Defines the base layout of the slot machine UI:
+- Slot window container (.machine)
+- Balance, bet controls, spin/add-funds buttons
+- Slot stage with grid (#reels), overlay (#line-overlay), and bonus HUD
+- Bonus overlay card shown after free spins
+
+styles.css
+-----------
+Controls layout, centering, and visuals.
+Key tweak points:
+- :root variables: --slot-size, --slot-font, --gap (resize everything)
+- .reel: each slot cell’s visual
+- .wild-badge: the Nx badge (customize color, size, animations)
+- .bonus-hud and .bonus-overlay: bonus text and summary card
+
+types.ts
+---------
+Holds TypeScript interfaces for data structures:
+- SymbolId, PayoutTable, LineWin, ScoredGrid (includes bonusRetriggerSpins)
+Change here when adding new symbols or result properties.
+
+storage.ts
+-----------
+Handles saving balance (and optionally bet, SFX, etc.) to localStorage.
+
+rng.ts
+-------
+Generates random numbers for weighted symbol selection.
+Can be seeded for reproducible test runs.
+
+slotmachine.ts
+---------------
+The game’s *logic engine* (model layer).
+Responsibilities:
+- Default config (DEFAULT_SYMBOLS, DEFAULT_PAYOUT, DEFAULT_CONFIG)
+- Wallet handling: getWallet, setBetCents, addFunds
+- Weighted symbol selection via pickWeightedSymbol()
+- Grid generation:
+  - generateGrid(): Base game (≤1 FS per column)
+  - generateGridForBonus(wilds): Bonus game (≤1 FS per column, no FS under wilds)
+- Scoring:
+  - scoreGrid(): Checks horizontal and diagonal lines, applies wilds
+  - All-wild lines pay as best regular symbol
+  - Retrigger detection (3+ FS → +2 spins during bonus)
+- Base spin(): Deducts bet, generates grid, scores, adds winnings, triggers free spins
+
+Tweak Here:
+- Symbol weights in DEFAULT_SYMBOLS (affects rarity)
+- Multipliers in DEFAULT_PAYOUT (affects payout size)
+- FS trigger mapping (3→5 spins, 4→8, 5→10)
+- Retrigger amount (+2 → +3 or +5)
+- Wild multiplier caps
+- Grid size (reels/rows)
+- RTP balancing
+
+main.ts
+--------
+The *controller/UI layer*, connecting the DOM and logic.
+Responsibilities:
+- Build the slot grid (div.reel > span.emoji)
+- Manage DOM elements (balance, bet, buttons, overlays)
+- Handle UI updates and currency formatting
+- Animate reels (animateColumnsThenResolve)
+- Manage wild spawning, growth, and rendering
+- Control free spin sequences (runBonusSession)
+- Draw win lines via SVG overlay
+
+Tweak Here:
+- Spin timing (spinMs, delayBetween)
+- Wild spawn chance/max per spin
+- Wild increment rules (incrementWildsByMask)
+- Bonus HUD visuals and timing
+- Line colors and thickness (symbolColor in main.ts)
+- Add new keyboard or UI controls
+
+--------------------------------------
+Gameplay Flow
+--------------------------------------
+
+Base Spin:
+1. Player clicks SPIN.
+2. Bet deducted, grid generated (machine.spin()).
+3. Reels animated, results displayed.
+4. Winnings added, FS triggered if 3+ bells appear.
+
+Bonus Spins:
+1. Show HUD (FREE SPINS X / N).
+2. Increment wilds that participated in wins.
+3. Spawn new wilds in empty cells (chance-based).
+4. Generate gridForBonus (no FS under wilds).
+5. Animate reels, score with isInBonus = true.
+6. Apply retriggers (3+ bells → +2 spins).
+7. After final spin, show summary card and total win.
+
+--------------------------------------
+Design & Balancing Tips
+--------------------------------------
+
+- Make bonus rarer: lower FS weight in DEFAULT_SYMBOLS or require 4+ FS.
+- Make retriggers stronger: change bonusRetriggerSpins in scoreGrid.
+- Cap multipliers: in incrementWildsByMask() or scoreGrid().
+- Test RTP: simulate thousands of spins (future improvement).
+- Adjust visuals: in styles.css (wild badge, overlay colors).
+- Adjust pacing: tweak spinMs/delayBetween.
+
+--------------------------------------
+Useful Function Locations
+--------------------------------------
+
+FS control:
+  slotmachine.generateGrid() & generateGridForBonus()
+
+Wild growth:
+  incrementWildsByMask(), buildWinMask()
+
+Wild spawn:
+  spawnNewWilds()
+
+All-wild pay rule:
+  slotmachine.scoreGrid() → bestFiveSymbol()
+
+Retrigger handling:
+  slotmachine.scoreGrid(), runBonusSession()
+
+--------------------------------------
+Optional Next Steps
+--------------------------------------
+
+1. Add visual “+2 SPINS!” retrigger flash.
+2. Add sound effects for spins, wins, wilds.
+3. Build a balance simulator script to analyze RTP.
+4. Add a settings menu to adjust bet increments or SFX volume.
+5. Add an “auto-spin” toggle to run several spins in sequence.
+
