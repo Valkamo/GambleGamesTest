@@ -87,17 +87,31 @@ export class SlotMachine {
   }
 
   /** Generate a fresh rows×reels grid using weighted symbols. */
-  generateGrid(): SymbolId[][] {
-    const grid: SymbolId[][] = [];
-    for (let r = 0; r < this.config.rows; r++) {
-      const row: SymbolId[] = [];
-      for (let c = 0; c < this.config.reels; c++) {
-        row.push(this.pickWeightedSymbol());
-      }
-      grid.push(row);
+ generateGrid(): SymbolId[][] {
+  const rows = this.config.rows;
+  const cols = this.config.reels;
+
+  // Pre-allocate rows
+  const grid: SymbolId[][] = Array.from({ length: rows }, () => Array<SymbolId>(cols));
+
+  for (let c = 0; c < cols; c++) {
+    let fsPlacedInThisCol = false;
+
+    for (let r = 0; r < rows; r++) {
+      let sym: SymbolId;
+
+      // Keep drawing until we respect the "1 FS per column" rule
+      do {
+        sym = this.pickWeightedSymbol();
+      } while (sym === "FS" && fsPlacedInThisCol);
+
+      grid[r][c] = sym;
+      if (sym === "FS") fsPlacedInThisCol = true;
     }
-    return grid;
   }
+
+  return grid;
+}
 
   /**
    * Score grid with left-to-right rules:
@@ -108,82 +122,83 @@ export class SlotMachine {
    * and multiplies the line payout by its multiplier (stacking).
    */
   scoreGrid(
-    grid: SymbolId[][],
-    betCents: number,
-    wilds?: number[][]
-  ): ScoredGrid {
-    const lineWins: LineWin[] = [];
-    let totalWinCents = 0;
-    let anySevenJackpot = false;
+  grid: SymbolId[][],
+  betCents: number,
+  wilds?: number[][],
+  isInBonus: boolean = false
+): ScoredGrid {
+  const lineWins: LineWin[] = [];
+  let totalWinCents = 0;
+  let anySevenJackpot = false;
 
-    const R = this.config.rows;
-    const C = this.config.reels;
+  const R = this.config.rows;
+  const C = this.config.reels;
 
-    const scoreRun = (r0: number, c0: number, dr: number, dc: number) => {
-      // Find target symbol (first non-wild along the path)
-      let r = r0,
-        c = c0;
-      let target: SymbolId | null = null;
-      for (let k = 0; k < 5 && r >= 0 && r < R && c >= 0 && c < C; k++) {
-        const sym = grid[r][c];
-        const isWild = wilds && wilds[r][c] > 0;
-        if (!isWild) {
-          target = sym;
-          break;
-        }
-        r += dr;
-        c += dc;
+  const scoreRun = (r0: number, c0: number, dr: number, dc: number) => {
+    // Find target symbol (first non-wild along the path)
+    let r = r0, c = c0;
+    let target: SymbolId | null = null;
+    for (let k = 0; k < 5 && r >= 0 && r < R && c >= 0 && c < C; k++) {
+      const sym = grid[r][c];
+      const isWild = wilds && (wilds[r][c] | 0) > 0;
+      if (!isWild) { target = sym; break; }
+      r += dr; c += dc;
+    }
+    if (!target) return; // all-wild leading segment → skip
+
+    // Count run length where cells are target or wild
+    r = r0; c = c0;
+    let len = 0;
+    let productMult = 1; // line multiplier from wilds
+    for (let k = 0; k < 5 && r >= 0 && r < R && c >= 0 && c < C; k++) {
+      const sym = grid[r][c];
+      const w = wilds ? (wilds[r][c] | 0) : 0;
+      if (sym === target || w > 0) {
+        len++;
+        if (w > 0) productMult *= w;
+        r += dr; c += dc;
+      } else {
+        break;
       }
-      if (!target) return; // all-wild leading segment → skip (or pick best symbol; we keep simple)
+    }
 
-      // Count run length where cells are target or wild
-      r = r0;
-      c = c0;
-      let len = 0;
-      let productMult = 1; // line multiplier from wilds
-      for (let k = 0; k < 5 && r >= 0 && r < R && c >= 0 && c < C; k++) {
-        const sym = grid[r][c];
-        const w = wilds ? wilds[r][c] | 0 : 0;
-        if (sym === target || w > 0) {
-          len++;
-          if (w > 0) productMult *= w;
-          r += dr;
-          c += dc;
-        } else {
-          break;
-        }
+    if (len >= 3) {
+      const clamped = (len >= 5 ? 5 : len) as 3 | 4 | 5;
+      const baseMult = this.config.payoutTable[target][clamped];
+      let win = Math.floor(betCents * baseMult);
+      win = Math.floor(win * productMult); // apply wild multipliers
+      if (win > 0) {
+        lineWins.push({
+          startRow: r0,
+          startCol: c0,
+          endRow:   r0 + (clamped - 1) * dr,
+          endCol:   c0 + (clamped - 1) * dc,
+          length:   clamped,
+          symbol:   target,
+          winCents: win,
+        });
+        totalWinCents += win;
+        if (target === "SEVEN" && clamped === 5) anySevenJackpot = true;
       }
+    }
+  };
 
-      if (len >= 3) {
-        const clamped = (len >= 5 ? 5 : len) as 3 | 4 | 5;
-        const baseMult = this.config.payoutTable[target][clamped];
-        let win = Math.floor(betCents * baseMult);
-        win = Math.floor(win * productMult); // apply wild multipliers
-        if (win > 0) {
-          lineWins.push({
-            startRow: r0,
-            startCol: c0,
-            endRow: r0 + (clamped - 1) * dr,
-            endCol: c0 + (clamped - 1) * dc,
-            length: clamped,
-            symbol: target,
-            winCents: win,
-          });
-          totalWinCents += win;
-          if (target === "SEVEN" && clamped === 5) anySevenJackpot = true;
-        }
-      }
-    };
+  // Evaluate all starting positions from the leftmost column
+  for (let r = 0; r < R; r++) scoreRun(r, 0, 0, +1);     // horizontal
+  for (let r = 0; r <= R - 3; r++) scoreRun(r, 0, +1, +1); // diag down-right
+  for (let r = 2; r < R; r++) scoreRun(r, 0, -1, +1);      // diag up-right
 
-    // Horizontal
-    for (let r = 0; r < R; r++) scoreRun(r, 0, 0, +1);
-    // Diagonal down-right
-    for (let r = 0; r <= R - 3; r++) scoreRun(r, 0, +1, +1);
-    // Diagonal up-right
-    for (let r = 2; r < R; r++) scoreRun(r, 0, -1, +1);
-
-    return { totalWinCents, lineWins, isJackpot: anySevenJackpot };
+  // Bonus retrigger: if we are in bonus mode and 3+ FS are present anywhere, grant +2 spins
+  let bonusRetriggerSpins = 0;
+  if (isInBonus) {
+    const scatters = this.countScatters(grid);
+    if (scatters >= 3) {
+      bonusRetriggerSpins = 2;
+    }
   }
+
+  return { totalWinCents, lineWins, isJackpot: anySevenJackpot, bonusRetriggerSpins };
+}
 
   private pickWeightedSymbol(): SymbolId {
     const r = this.rng.next() * this.totalWeight;

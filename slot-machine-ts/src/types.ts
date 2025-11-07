@@ -47,4 +47,6 @@ export interface ScoredGrid {
   totalWinCents: number;
   lineWins: LineWin[];
   isJackpot: boolean;
+  /** When scoring in bonus mode, 3+ FS bells award extra spins (e.g., 2). */
+  bonusRetriggerSpins?: number;
 }

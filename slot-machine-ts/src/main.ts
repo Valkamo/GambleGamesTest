@@ -147,10 +147,10 @@ function setDisabled(disabled: boolean): void {
 /* ---------------- Wild badges ---------------- */
 function setWildBadge(r: number, c: number, mult: number): void {
   removeWildBadge(r, c);
-  if (mult <= 0) return;
+  if (!Number.isFinite(mult) || mult <= 0) return;
   const badge = document.createElement("div");
   badge.className = "wild-badge";
-  badge.textContent = `x${mult}`;
+  badge.textContent = `${mult}x`; // <- “2x” format
   cellEls[r][c].appendChild(badge);
 }
 function removeWildBadge(r: number, c: number): void {
@@ -259,6 +259,25 @@ function renderPaytable(): void {
 
 /* ---------------- Bonus helpers ---------------- */
 
+/** Add/remove a temporary element for spotlight. */
+function flashSpotlight(r: number, c: number): void {
+  const spot = document.createElement("div");
+  spot.className = "wild-spotlight";
+  cellEls[r][c].appendChild(spot);
+  setTimeout(() => spot.remove(), 600);
+}
+
+/** Ensure badge exists, then add a one-shot CSS animation class. */
+function animateBadge(r: number, c: number, cls: "pop" | "bump"): void {
+  const badge = cellEls[r][c].querySelector(
+    ".wild-badge"
+  ) as HTMLDivElement | null;
+  if (!badge) return; // badge should already exist from renderWildBadges()
+  badge.classList.remove("pop", "bump"); // reset any previous animation
+  void badge.offsetWidth; // reflow to restart animation
+  badge.classList.add(cls);
+}
+
 /** Render wild badges for all cells from the current wilds grid. */
 function renderWildBadges(wilds: number[][]): void {
   for (let r = 0; r < ROWS; r++) {
@@ -297,11 +316,11 @@ function incrementExistingWilds(
 }
 
 /** Spawn brand-new x1 wilds in empty cells only (no stacking by landing). */
-function spawnNewWilds(wilds: number[][]): number {
-  // Tweak these to taste
-  const chanceToSpawn = 0.7; // 70% of spins spawn wilds
-  const maxNewPerSpin = 2; // up to 2 new wilds per spin
-  if (Math.random() > chanceToSpawn) return 0;
+function spawnNewWilds(wilds: number[][]): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  const chanceToSpawn = 0.7; // 70% of spins spawn
+  const maxNewPerSpin = 2; // up to 2 new wilds
+  if (Math.random() > chanceToSpawn) return out;
 
   const empty: Array<[number, number]> = [];
   for (let r = 0; r < ROWS; r++) {
@@ -309,24 +328,24 @@ function spawnNewWilds(wilds: number[][]): number {
       if ((wilds[r][c] | 0) === 0) empty.push([r, c]);
     }
   }
-  if (empty.length === 0) return 0;
+  if (empty.length === 0) return out;
 
-  // Choose 1 or 2 unique empty cells
-  const newCount = Math.min(
+  // Pick 1 or 2 unique empties
+  const want = Math.min(
     1 + (Math.random() < 0.4 ? 1 : 0),
     maxNewPerSpin,
     empty.length
   );
-  // Shuffle a little and pick
   for (let i = empty.length - 1; i > 0; i--) {
     const j = (Math.random() * (i + 1)) | 0;
     [empty[i], empty[j]] = [empty[j], empty[i]];
   }
-  for (let i = 0; i < newCount; i++) {
+  for (let i = 0; i < want; i++) {
     const [r, c] = empty[i];
-    wilds[r][c] = 1; // brand-new wild starts at x1
+    wilds[r][c] = 1;
+    out.push([r, c]);
   }
-  return newCount;
+  return out;
 }
 
 async function runBonusSession(freeSpins: number): Promise<void> {
@@ -335,12 +354,10 @@ async function runBonusSession(freeSpins: number): Promise<void> {
   bonusActive = true;
   setDisabled(true);
 
-  // Persistent wild multipliers (0 = none)
   const wilds: number[][] = Array.from({ length: ROWS }, () =>
     Array(COLS).fill(0)
   );
 
-  // HUD on, end card off
   bonusOverlay.hidden = true;
   bonusCloseBtn.hidden = true;
   bonusHud.hidden = false;
@@ -348,53 +365,56 @@ async function runBonusSession(freeSpins: number): Promise<void> {
   let bonusTotal = 0;
   const betCents = Number(betEl.value) || 100;
 
-  // Tracks which wild cells participated in a winning line on the previous spin
   let prevWinMask: boolean[][] | null = null;
 
   for (let i = 0; i < freeSpins; i++) {
-    // Show progress
     bonusHud.textContent = `FREE SPINS ${i + 1} / ${freeSpins}`;
 
-    // 1) Increment ONLY wilds that were in a winning segment last spin
+    // 1) Increment ONLY wilds that were in last spin’s wins → animate bump
     if (prevWinMask) {
-      incrementWildsByMask(wilds, prevWinMask /*, cap e.g. 10 if you want */);
+      const incCells = incrementWildsByMask(wilds, prevWinMask /*, cap */);
+      renderWildBadges(wilds);
+      for (const [r, c] of incCells) {
+        animateBadge(r, c, "bump");
+      }
     }
 
-    // 2) Clear glow/lines (keep badges)
+    // 2) Clear glow/lines (badges stay)
     clearForBonusSpin();
 
-    // 3) Spawn brand-new x1 wilds in empty cells (optional; remove if undesired)
-    spawnNewWilds(wilds);
-
-    // 4) Render badges reflecting increment + spawns
+    // 3) Spawn brand-new wilds in empty cells → render & POP + spotlight
+    const newWilds = spawnNewWilds(wilds);
     renderWildBadges(wilds);
+    for (const [r, c] of newWilds) {
+      animateBadge(r, c, "pop");
+      flashSpotlight(r, c);
+    }
 
-    // 5) Spin/settle with wild awareness (wild cells show no emoji, only xN)
+    // 4) Spin/settle (slower in bonus), wild cells show no emoji (badge only)
     const grid = machine.generateGrid();
-    await animateColumnsThenResolve(
-      grid,
-      /*spinMs*/ 900,
-      /*delayBetween*/ 200,
-      wilds
-    );
+    await animateColumnsThenResolve(grid, 900, 200, wilds);
 
-    // 6) Score with wild overlay; visualize wins; accumulate total
-    const scored = machine.scoreGrid(grid, betCents, wilds);
+    // 5) Score with wild overlay; draw wins; accumulate
+    const scored = machine.scoreGrid(grid, betCents, wilds, true);
     showWins(scored.lineWins);
     bonusTotal += scored.totalWinCents;
 
-    // 7) Build mask for next spin’s increment
+    // 6) Prepare win mask for next spin’s increment
     prevWinMask = buildWinMask(scored.lineWins);
 
     await new Promise((res) => setTimeout(res, 700));
+
+    if (scored.bonusRetriggerSpins && scored.bonusRetriggerSpins > 0) {
+      freeSpins += scored.bonusRetriggerSpins; // +2 spins per retrigger
+      // Optional: show a small HUD flash “+2 SPINS!”
+    }
   }
 
-  // Pay once at the end
+  // credit once
   machine.addFunds(bonusTotal);
   updateUIFromWallet();
 
-  cleanupWildsAfterBonus("CHERRY");
-  // End-of-bonus card with final total
+  // cleanup & end card
   bonusHud.hidden = true;
   bonusProgress.textContent = `Bonus Complete`;
   bonusTotalEl.textContent = formatEuro(bonusTotal);
@@ -430,14 +450,18 @@ function incrementWildsByMask(
   wilds: number[][],
   mask: boolean[][],
   cap = Number.POSITIVE_INFINITY
-): void {
+): Array<[number, number]> {
+  const inc: Array<[number, number]> = [];
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       if (mask[r][c] && wilds[r][c] > 0) {
-        wilds[r][c] = Math.min(cap, wilds[r][c] + 1);
+        const before = wilds[r][c];
+        wilds[r][c] = Math.min(cap, before + 1);
+        if (wilds[r][c] !== before) inc.push([r, c]);
       }
     }
   }
+  return inc;
 }
 /* ---------------- Events ---------------- */
 async function onSpinClick(): Promise<void> {
