@@ -13,18 +13,32 @@ const lastWinEl = document.getElementById("last-win") as HTMLSpanElement;
 const reelsRoot = document.getElementById("reels") as HTMLDivElement;
 const spinBtn = document.getElementById("spin") as HTMLButtonElement;
 const addFundsBtn = document.getElementById("add-funds") as HTMLButtonElement;
+const bonusHud = document.getElementById("bonus-hud") as HTMLDivElement;
+
 const paytableList = document.getElementById(
   "paytable-list"
 ) as HTMLUListElement;
 
-/** SVG overlay for win lines — non-null assertion (!) because it exists in index.html */
+let bonusActive = false;
+
 const overlaySvg = document.querySelector<SVGSVGElement>("#line-overlay")!;
 const slotStage = document.getElementById("slot-stage") as HTMLDivElement;
 
+/* Bonus UI */
+const bonusOverlay = document.getElementById("bonus-overlay") as HTMLDivElement;
+const bonusProgress = document.getElementById(
+  "bonus-progress"
+) as HTMLDivElement;
+const bonusTotalEl = document.getElementById("bonus-total") as HTMLSpanElement;
+const bonusCloseBtn = document.getElementById(
+  "bonus-close"
+) as HTMLButtonElement;
+
+bonusOverlay.hidden = true;
+bonusCloseBtn.hidden = true;
+
 /* ---------------- Euro helpers ---------------- */
 function formatEuro(cents: number): string {
-  // You’re in Åland/Finland; use standard Euro formatting.
-  // Keeping it simple: €X.YY
   return `€${(cents / 100).toFixed(2)}`;
 }
 
@@ -41,20 +55,34 @@ const ROWS = 5;
 const COLS = 5;
 
 const cellEls: HTMLDivElement[][] = [];
+const emojiEls: HTMLSpanElement[][] = [];
+
 function buildGrid(): void {
   reelsRoot.innerHTML = "";
   cellEls.length = 0;
+  emojiEls.length = 0;
 
   for (let r = 0; r < ROWS; r++) {
     const rowCells: HTMLDivElement[] = [];
+    const rowEmojis: HTMLSpanElement[] = [];
+
     for (let c = 0; c < COLS; c++) {
       const cell = document.createElement("div");
       cell.className = "reel";
-      cell.textContent = "🍒"; // placeholder
+
+      const emoji = document.createElement("span");
+      emoji.className = "emoji";
+      emoji.textContent = "🍒"; // placeholder
+
+      cell.appendChild(emoji);
       reelsRoot.appendChild(cell);
+
       rowCells.push(cell);
+      rowEmojis.push(emoji);
     }
+
     cellEls.push(rowCells);
+    emojiEls.push(rowEmojis);
   }
 }
 buildGrid();
@@ -65,6 +93,7 @@ const symbolToEmoji: Record<SymbolId, string> = {
   LEMON: "🍋",
   STAR: "⭐",
   SEVEN: "7️⃣",
+  FS: "🔔",
 };
 
 const symbolColor: Record<SymbolId, string> = {
@@ -72,6 +101,7 @@ const symbolColor: Record<SymbolId, string> = {
   LEMON: "#ffd166",
   STAR: "#a78bfa",
   SEVEN: "#60a5fa",
+  FS: "#f59e0b",
 };
 
 /* ---------------- UI sync ---------------- */
@@ -84,7 +114,22 @@ function updateUIFromWallet(): void {
   saveWallet({ balanceCents: w.balanceCents });
 }
 
-function clearWinEffects(): void {
+/** Base game: clear glow + lines + any wild badges. */
+function clearAllEffects(): void {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      cellEls[r][c].classList.remove("win");
+      removeWildBadge(r, c);
+      if (!emojiEls[r][c].textContent || emojiEls[r][c].textContent === "") {
+        emojiEls[r][c].textContent = symbolToEmoji["CHERRY"];
+      }
+    }
+  }
+  overlaySvg.replaceChildren();
+}
+
+/** Bonus spin: clear glow + lines ONLY. Keep wild badges in place. */
+function clearForBonusSpin(): void {
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       cellEls[r][c].classList.remove("win");
@@ -99,8 +144,21 @@ function setDisabled(disabled: boolean): void {
   betEl.disabled = disabled;
 }
 
+/* ---------------- Wild badges ---------------- */
+function setWildBadge(r: number, c: number, mult: number): void {
+  removeWildBadge(r, c);
+  if (mult <= 0) return;
+  const badge = document.createElement("div");
+  badge.className = "wild-badge";
+  badge.textContent = `x${mult}`;
+  cellEls[r][c].appendChild(badge);
+}
+function removeWildBadge(r: number, c: number): void {
+  const existing = cellEls[r][c].querySelector(".wild-badge");
+  if (existing) existing.remove();
+}
+
 /* ---------------- Overlay drawing ---------------- */
-/** Center of a given cell, in overlay (slotStage) coordinates. */
 function getCellCenter(r: number, c: number): { x: number; y: number } {
   const stageRect = slotStage.getBoundingClientRect();
   const cellRect = cellEls[r][c].getBoundingClientRect();
@@ -110,29 +168,25 @@ function getCellCenter(r: number, c: number): { x: number; y: number } {
   };
 }
 
-/** Draw straight lines across winning segments + glow cells. */
 function showWins(lineWins: LineWin[]): void {
-  // Size the overlay to the stage
   const rect = slotStage.getBoundingClientRect();
   overlaySvg.setAttribute("width", String(rect.width));
   overlaySvg.setAttribute("height", String(rect.height));
   overlaySvg.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
-
   overlaySvg.replaceChildren();
 
   for (const w of lineWins) {
-    // Glow all cells on the path
-    let r = w.startRow;
-    let c = w.startCol;
-    const rStep = Math.sign(w.endRow - w.startRow); // -1, 0, +1
-    const cStep = Math.sign(w.endCol - w.startCol); //  +1
+    // glow all cells in the segment (works for diagonals too)
+    const rStep = Math.sign(w.endRow - w.startRow);
+    const cStep = Math.sign(w.endCol - w.startCol);
+    let r = w.startRow,
+      c = w.startCol;
     for (let k = 0; k < w.length; k++) {
       cellEls[r][c].classList.add("win");
       r += rStep;
       c += cStep;
     }
 
-    // Straight line between centers
     const start = getCellCenter(w.startRow, w.startCol);
     const end = getCellCenter(w.endRow, w.endCol);
 
@@ -148,10 +202,12 @@ function showWins(lineWins: LineWin[]): void {
 }
 
 /* ---------------- Animation: column-by-column ---------------- */
+
 async function animateColumnsThenResolve(
   grid: SymbolId[][],
   spinMs = 600,
-  delayBetween = 140
+  delayBetween = 140,
+  wilds?: number[][]
 ): Promise<void> {
   const emojis = Object.values(symbolToEmoji);
 
@@ -161,15 +217,22 @@ async function animateColumnsThenResolve(
     await new Promise<void>((resolve) => {
       const tick = (t: number) => {
         const elapsed = t - t0;
+
         if (elapsed < spinMs) {
           for (let r = 0; r < ROWS; r++) {
-            const idx = Math.floor(Math.random() * emojis.length);
-            cellEls[r][col].textContent = emojis[idx];
+            const isWild = !!wilds && (wilds[r][col] | 0) > 0;
+            // show nothing in the emoji span for wild cells (badge stays visible)
+            emojiEls[r][col].textContent = isWild
+              ? ""
+              : emojis[Math.floor(Math.random() * emojis.length)];
           }
           requestAnimationFrame(tick);
         } else {
           for (let r = 0; r < ROWS; r++) {
-            cellEls[r][col].textContent = symbolToEmoji[grid[r][col]];
+            const isWild = !!wilds && (wilds[r][col] | 0) > 0;
+            emojiEls[r][col].textContent = isWild
+              ? ""
+              : symbolToEmoji[grid[r][col]];
           }
           resolve();
         }
@@ -194,21 +257,206 @@ function renderPaytable(): void {
   }
 }
 
+/* ---------------- Bonus helpers ---------------- */
+
+/** Render wild badges for all cells from the current wilds grid. */
+function renderWildBadges(wilds: number[][]): void {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      setWildBadge(r, c, wilds[r][c] | 0);
+    }
+  }
+}
+
+function cleanupWildsAfterBonus(placeholder: SymbolId = "CHERRY"): void {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      // remove any badge
+      removeWildBadge(r, c);
+      // if emoji span is empty, put a placeholder symbol
+      if (!emojiEls[r][c].textContent || emojiEls[r][c].textContent === "") {
+        emojiEls[r][c].textContent = symbolToEmoji[placeholder];
+      }
+    }
+  }
+  // clear lines just in case
+  overlaySvg.replaceChildren();
+}
+
+function incrementExistingWilds(
+  wilds: number[][],
+  cap = Number.POSITIVE_INFINITY
+): void {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (wilds[r][c] > 0) {
+        wilds[r][c] = Math.min(cap, wilds[r][c] + 1);
+      }
+    }
+  }
+}
+
+/** Spawn brand-new x1 wilds in empty cells only (no stacking by landing). */
+function spawnNewWilds(wilds: number[][]): number {
+  // Tweak these to taste
+  const chanceToSpawn = 0.7; // 70% of spins spawn wilds
+  const maxNewPerSpin = 2; // up to 2 new wilds per spin
+  if (Math.random() > chanceToSpawn) return 0;
+
+  const empty: Array<[number, number]> = [];
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if ((wilds[r][c] | 0) === 0) empty.push([r, c]);
+    }
+  }
+  if (empty.length === 0) return 0;
+
+  // Choose 1 or 2 unique empty cells
+  const newCount = Math.min(
+    1 + (Math.random() < 0.4 ? 1 : 0),
+    maxNewPerSpin,
+    empty.length
+  );
+  // Shuffle a little and pick
+  for (let i = empty.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [empty[i], empty[j]] = [empty[j], empty[i]];
+  }
+  for (let i = 0; i < newCount; i++) {
+    const [r, c] = empty[i];
+    wilds[r][c] = 1; // brand-new wild starts at x1
+  }
+  return newCount;
+}
+
+async function runBonusSession(freeSpins: number): Promise<void> {
+  if (freeSpins <= 0) return;
+
+  bonusActive = true;
+  setDisabled(true);
+
+  // Persistent wild multipliers (0 = none)
+  const wilds: number[][] = Array.from({ length: ROWS }, () =>
+    Array(COLS).fill(0)
+  );
+
+  // HUD on, end card off
+  bonusOverlay.hidden = true;
+  bonusCloseBtn.hidden = true;
+  bonusHud.hidden = false;
+
+  let bonusTotal = 0;
+  const betCents = Number(betEl.value) || 100;
+
+  // Tracks which wild cells participated in a winning line on the previous spin
+  let prevWinMask: boolean[][] | null = null;
+
+  for (let i = 0; i < freeSpins; i++) {
+    // Show progress
+    bonusHud.textContent = `FREE SPINS ${i + 1} / ${freeSpins}`;
+
+    // 1) Increment ONLY wilds that were in a winning segment last spin
+    if (prevWinMask) {
+      incrementWildsByMask(wilds, prevWinMask /*, cap e.g. 10 if you want */);
+    }
+
+    // 2) Clear glow/lines (keep badges)
+    clearForBonusSpin();
+
+    // 3) Spawn brand-new x1 wilds in empty cells (optional; remove if undesired)
+    spawnNewWilds(wilds);
+
+    // 4) Render badges reflecting increment + spawns
+    renderWildBadges(wilds);
+
+    // 5) Spin/settle with wild awareness (wild cells show no emoji, only xN)
+    const grid = machine.generateGrid();
+    await animateColumnsThenResolve(
+      grid,
+      /*spinMs*/ 900,
+      /*delayBetween*/ 200,
+      wilds
+    );
+
+    // 6) Score with wild overlay; visualize wins; accumulate total
+    const scored = machine.scoreGrid(grid, betCents, wilds);
+    showWins(scored.lineWins);
+    bonusTotal += scored.totalWinCents;
+
+    // 7) Build mask for next spin’s increment
+    prevWinMask = buildWinMask(scored.lineWins);
+
+    await new Promise((res) => setTimeout(res, 700));
+  }
+
+  // Pay once at the end
+  machine.addFunds(bonusTotal);
+  updateUIFromWallet();
+
+  cleanupWildsAfterBonus("CHERRY");
+  // End-of-bonus card with final total
+  bonusHud.hidden = true;
+  bonusProgress.textContent = `Bonus Complete`;
+  bonusTotalEl.textContent = formatEuro(bonusTotal);
+  bonusCloseBtn.hidden = false;
+  bonusOverlay.hidden = false;
+  bonusCloseBtn.onclick = () => {
+    bonusOverlay.hidden = true;
+  };
+
+  setDisabled(false);
+  bonusActive = false;
+}
+
+function buildWinMask(lineWins: LineWin[]): boolean[][] {
+  const mask: boolean[][] = Array.from({ length: ROWS }, () =>
+    Array(COLS).fill(false)
+  );
+  for (const w of lineWins) {
+    const rStep = Math.sign(w.endRow - w.startRow);
+    const cStep = Math.sign(w.endCol - w.startCol);
+    let r = w.startRow,
+      c = w.startCol;
+    for (let k = 0; k < w.length; k++) {
+      if (r >= 0 && r < ROWS && c >= 0 && c < COLS) mask[r][c] = true;
+      r += rStep;
+      c += cStep;
+    }
+  }
+  return mask;
+}
+
+function incrementWildsByMask(
+  wilds: number[][],
+  mask: boolean[][],
+  cap = Number.POSITIVE_INFINITY
+): void {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (mask[r][c] && wilds[r][c] > 0) {
+        wilds[r][c] = Math.min(cap, wilds[r][c] + 1);
+      }
+    }
+  }
+}
 /* ---------------- Events ---------------- */
 async function onSpinClick(): Promise<void> {
   try {
     setDisabled(true);
-    clearWinEffects();
-    machine.setBetCents(Number(betEl.value));
+    clearAllEffects(); // <-- was clearWinEffects()
 
+    machine.setBetCents(Number(betEl.value));
     const result = machine.spin();
 
-    // Column-by-column animation, then reveal and draw lines
     await animateColumnsThenResolve(result.grid, 600, 140);
     lastWinEl.textContent = formatEuro(result.totalWinCents);
     showWins(result.lineWins);
-
     updateUIFromWallet();
+
+    if (result.freeSpinsAwarded > 0) {
+      await new Promise((res) => setTimeout(res, 600));
+      await runBonusSession(result.freeSpinsAwarded);
+    }
   } catch (err) {
     alert(err instanceof Error ? err.message : "Unknown error");
   } finally {

@@ -1,4 +1,4 @@
-export type SymbolId = "CHERRY" | "LEMON" | "STAR" | "SEVEN";
+export type SymbolId = "CHERRY" | "LEMON" | "STAR" | "SEVEN" | "FS"; // FS = Free Spins (scatter)
 
 export interface SymbolDef {
   id: SymbolId;
@@ -30,7 +30,7 @@ export interface LineWin {
   endRow: number;
   endCol: number;
   length: 3 | 4 | 5;
-  symbol: SymbolId;
+  symbol: SymbolId; // base symbol (not wild)
   winCents: number;
 }
 
@@ -38,5 +38,13 @@ export interface SpinResult {
   grid: SymbolId[][]; // [row][col], rows x reels
   totalWinCents: number;
   lineWins: LineWin[];
-  isJackpot: boolean; // true if any 5-in-a-row of SEVEN from leftmost
+  isJackpot: boolean; // true if any 5-of-a-kind SEVEN from leftmost
+  freeSpinsAwarded: number; // 0 or 5/8/10 based on FS scatters in base game
+}
+
+/** Bonus evaluation (used internally by main.ts when scoring free spins with wilds). */
+export interface ScoredGrid {
+  totalWinCents: number;
+  lineWins: LineWin[];
+  isJackpot: boolean;
 }

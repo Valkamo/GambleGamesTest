@@ -6,16 +6,16 @@
     <title>TypeScript Slots</title>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
+  <!-- ...head unchanged... -->
   <body>
     <div id="root">
       <div class="machine">
         <h1 class="title">🎰 TypeScript Slots</h1>
 
         <div class="bank">
-          <div class="bank-item">Balance: <span id="balance">—</span></div>
+          <div class="bank-item">Balance: <span id="balance">€0.00</span></div>
           <div class="bank-item">
             Bet:
-            <!-- values are cents; labels are euros -->
             <select id="bet">
               <option value="25">€0.25</option>
               <option value="50">€0.50</option>
@@ -26,12 +26,11 @@
           </div>
         </div>
 
-        <!-- SLOT WINDOW (stage holds grid + overlay) -->
         <div class="slot-window">
           <div class="slot-stage" id="slot-stage">
             <div id="reels" class="reels"></div>
-            <!-- SVG overlay for win lines -->
             <svg id="line-overlay" class="line-overlay"></svg>
+            <div id="bonus-hud" class="bonus-hud" hidden>FREE SPINS 1 / 5</div>
           </div>
         </div>
 
@@ -45,9 +44,21 @@
         </div>
 
         <details class="paytable">
-          <summary>Paytable (per row/diag, left→right from column 0)</summary>
+          <summary>Paytable (rows/diagonals, left→right)</summary>
           <ul id="paytable-list"></ul>
         </details>
+      </div>
+    </div>
+
+    <!-- BONUS OVERLAY -->
+    <div id="bonus-overlay" class="bonus-overlay" hidden>
+      <div class="bonus-card">
+        <div class="bonus-title">FREE SPINS</div>
+        <div class="bonus-sub" id="bonus-progress">Spin 1 / 5</div>
+        <div class="bonus-total">
+          Total: <span id="bonus-total">€0.00</span>
+        </div>
+        <button id="bonus-close" class="btn" hidden>Close</button>
       </div>
     </div>
 
