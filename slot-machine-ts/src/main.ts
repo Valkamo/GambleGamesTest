@@ -287,34 +287,6 @@ function renderWildBadges(wilds: number[][]): void {
   }
 }
 
-function cleanupWildsAfterBonus(placeholder: SymbolId = "CHERRY"): void {
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      // remove any badge
-      removeWildBadge(r, c);
-      // if emoji span is empty, put a placeholder symbol
-      if (!emojiEls[r][c].textContent || emojiEls[r][c].textContent === "") {
-        emojiEls[r][c].textContent = symbolToEmoji[placeholder];
-      }
-    }
-  }
-  // clear lines just in case
-  overlaySvg.replaceChildren();
-}
-
-function incrementExistingWilds(
-  wilds: number[][],
-  cap = Number.POSITIVE_INFINITY
-): void {
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      if (wilds[r][c] > 0) {
-        wilds[r][c] = Math.min(cap, wilds[r][c] + 1);
-      }
-    }
-  }
-}
-
 /** Spawn brand-new x1 wilds in empty cells only (no stacking by landing). */
 function spawnNewWilds(wilds: number[][]): Array<[number, number]> {
   const out: Array<[number, number]> = [];
@@ -391,7 +363,8 @@ async function runBonusSession(freeSpins: number): Promise<void> {
     }
 
     // 4) Spin/settle (slower in bonus), wild cells show no emoji (badge only)
-    const grid = machine.generateGrid();
+
+    const grid = machine.generateGridForBonus(wilds);
     await animateColumnsThenResolve(grid, 900, 200, wilds);
 
     // 5) Score with wild overlay; draw wins; accumulate

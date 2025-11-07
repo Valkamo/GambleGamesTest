@@ -87,31 +87,54 @@ export class SlotMachine {
   }
 
   /** Generate a fresh rows×reels grid using weighted symbols. */
- generateGrid(): SymbolId[][] {
-  const rows = this.config.rows;
-  const cols = this.config.reels;
+  generateGrid(): SymbolId[][] {
+    const rows = this.config.rows;
+    const cols = this.config.reels;
+    const grid: SymbolId[][] = Array.from({ length: rows }, () =>
+      Array<SymbolId>(cols)
+    );
 
-  // Pre-allocate rows
-  const grid: SymbolId[][] = Array.from({ length: rows }, () => Array<SymbolId>(cols));
-
-  for (let c = 0; c < cols; c++) {
-    let fsPlacedInThisCol = false;
-
-    for (let r = 0; r < rows; r++) {
-      let sym: SymbolId;
-
-      // Keep drawing until we respect the "1 FS per column" rule
-      do {
-        sym = this.pickWeightedSymbol();
-      } while (sym === "FS" && fsPlacedInThisCol);
-
-      grid[r][c] = sym;
-      if (sym === "FS") fsPlacedInThisCol = true;
+    for (let c = 0; c < cols; c++) {
+      let fsPlaced = false;
+      for (let r = 0; r < rows; r++) {
+        let sym: SymbolId;
+        do {
+          sym = this.pickWeightedSymbol();
+        } while (sym === "FS" && fsPlaced); // only one FS per column
+        grid[r][c] = sym;
+        if (sym === "FS") fsPlaced = true;
+      }
     }
+    return grid;
   }
 
-  return grid;
-}
+  /**
+   * Generate a bonus-game grid with:
+   *  - ≤1 FS (bell) per column
+   *  - NO FS on cells that already have a wild (wilds[r][c] > 0)
+   */
+  generateGridForBonus(wilds: number[][]): SymbolId[][] {
+    const rows = this.config.rows;
+    const cols = this.config.reels;
+    const grid: SymbolId[][] = Array.from({ length: rows }, () =>
+      Array<SymbolId>(cols)
+    );
+
+    for (let c = 0; c < cols; c++) {
+      let fsPlaced = false;
+      for (let r = 0; r < rows; r++) {
+        const cellHasWild = (wilds[r][c] | 0) > 0;
+        let sym: SymbolId;
+        do {
+          sym = this.pickWeightedSymbol();
+          // reject FS if already placed in col OR if a wild occupies this cell
+        } while (sym === "FS" && (fsPlaced || cellHasWild));
+        grid[r][c] = sym;
+        if (sym === "FS") fsPlaced = true;
+      }
+    }
+    return grid;
+  }
 
   /**
    * Score grid with left-to-right rules:
@@ -122,83 +145,95 @@ export class SlotMachine {
    * and multiplies the line payout by its multiplier (stacking).
    */
   scoreGrid(
-  grid: SymbolId[][],
-  betCents: number,
-  wilds?: number[][],
-  isInBonus: boolean = false
-): ScoredGrid {
-  const lineWins: LineWin[] = [];
-  let totalWinCents = 0;
-  let anySevenJackpot = false;
+    grid: SymbolId[][],
+    betCents: number,
+    wilds?: number[][],
+    isInBonus: boolean = false
+  ): ScoredGrid {
+    const lineWins: LineWin[] = [];
+    let totalWinCents = 0;
+    let anySevenJackpot = false;
 
-  const R = this.config.rows;
-  const C = this.config.reels;
+    const R = this.config.rows;
+    const C = this.config.reels;
+    const bestSymbol = this.bestFiveSymbol();
 
-  const scoreRun = (r0: number, c0: number, dr: number, dc: number) => {
-    // Find target symbol (first non-wild along the path)
-    let r = r0, c = c0;
-    let target: SymbolId | null = null;
-    for (let k = 0; k < 5 && r >= 0 && r < R && c >= 0 && c < C; k++) {
-      const sym = grid[r][c];
-      const isWild = wilds && (wilds[r][c] | 0) > 0;
-      if (!isWild) { target = sym; break; }
-      r += dr; c += dc;
-    }
-    if (!target) return; // all-wild leading segment → skip
-
-    // Count run length where cells are target or wild
-    r = r0; c = c0;
-    let len = 0;
-    let productMult = 1; // line multiplier from wilds
-    for (let k = 0; k < 5 && r >= 0 && r < R && c >= 0 && c < C; k++) {
-      const sym = grid[r][c];
-      const w = wilds ? (wilds[r][c] | 0) : 0;
-      if (sym === target || w > 0) {
-        len++;
-        if (w > 0) productMult *= w;
-        r += dr; c += dc;
-      } else {
-        break;
+    const scoreRun = (r0: number, c0: number, dr: number, dc: number) => {
+      // 1) Find target symbol (first non-wild along the path). If none, use best-paying symbol.
+      let r = r0,
+        c = c0;
+      let target: SymbolId | null = null;
+      for (let k = 0; k < 5 && r >= 0 && r < R && c >= 0 && c < C; k++) {
+        const sym = grid[r][c];
+        const isWildCell = wilds && (wilds[r][c] | 0) > 0;
+        if (!isWildCell) {
+          target = sym;
+          break;
+        }
+        r += dr;
+        c += dc;
       }
-    }
+      if (!target) target = bestSymbol; // all-wild leading segment → treat as best symbol
 
-    if (len >= 3) {
-      const clamped = (len >= 5 ? 5 : len) as 3 | 4 | 5;
-      const baseMult = this.config.payoutTable[target][clamped];
-      let win = Math.floor(betCents * baseMult);
-      win = Math.floor(win * productMult); // apply wild multipliers
-      if (win > 0) {
-        lineWins.push({
-          startRow: r0,
-          startCol: c0,
-          endRow:   r0 + (clamped - 1) * dr,
-          endCol:   c0 + (clamped - 1) * dc,
-          length:   clamped,
-          symbol:   target,
-          winCents: win,
-        });
-        totalWinCents += win;
-        if (target === "SEVEN" && clamped === 5) anySevenJackpot = true;
+      // 2) Count run length where cells are target OR wild; multiply by product of wild multipliers
+      r = r0;
+      c = c0;
+      let len = 0;
+      let productMult = 1;
+      for (let k = 0; k < 5 && r >= 0 && r < R && c >= 0 && c < C; k++) {
+        const sym = grid[r][c];
+        const w = wilds ? wilds[r][c] | 0 : 0;
+        if (sym === target || w > 0) {
+          len++;
+          if (w > 0) productMult *= w;
+          r += dr;
+          c += dc;
+        } else {
+          break;
+        }
       }
-    }
-  };
 
-  // Evaluate all starting positions from the leftmost column
-  for (let r = 0; r < R; r++) scoreRun(r, 0, 0, +1);     // horizontal
-  for (let r = 0; r <= R - 3; r++) scoreRun(r, 0, +1, +1); // diag down-right
-  for (let r = 2; r < R; r++) scoreRun(r, 0, -1, +1);      // diag up-right
+      if (len >= 3) {
+        const clamped = (len >= 5 ? 5 : len) as 3 | 4 | 5;
+        const baseMult = this.config.payoutTable[target][clamped];
+        let win = Math.floor(betCents * baseMult);
+        // Optional safety: cap per-line multiplier if you want (e.g., productMult = Math.min(productMult, 500);)
+        win = Math.floor(win * productMult);
+        if (win > 0) {
+          lineWins.push({
+            startRow: r0,
+            startCol: c0,
+            endRow: r0 + (clamped - 1) * dr,
+            endCol: c0 + (clamped - 1) * dc,
+            length: clamped,
+            symbol: target,
+            winCents: win,
+          });
+          totalWinCents += win;
+          if (target === "SEVEN" && clamped === 5) anySevenJackpot = true;
+        }
+      }
+    };
 
-  // Bonus retrigger: if we are in bonus mode and 3+ FS are present anywhere, grant +2 spins
-  let bonusRetriggerSpins = 0;
-  if (isInBonus) {
-    const scatters = this.countScatters(grid);
-    if (scatters >= 3) {
-      bonusRetriggerSpins = 2;
+    // Left-to-right starts
+    for (let r = 0; r < R; r++) scoreRun(r, 0, 0, +1);
+    for (let r = 0; r <= R - 3; r++) scoreRun(r, 0, +1, +1);
+    for (let r = 2; r < R; r++) scoreRun(r, 0, -1, +1);
+
+    // Bonus retrigger: in bonus mode, 3+ FS anywhere → +2 spins
+    let bonusRetriggerSpins = 0;
+    if (isInBonus) {
+      const scatters = this.countScatters(grid);
+      if (scatters >= 3) bonusRetriggerSpins = 2;
     }
+
+    return {
+      totalWinCents,
+      lineWins,
+      isJackpot: anySevenJackpot,
+      bonusRetriggerSpins,
+    };
   }
-
-  return { totalWinCents, lineWins, isJackpot: anySevenJackpot, bonusRetriggerSpins };
-}
 
   private pickWeightedSymbol(): SymbolId {
     const r = this.rng.next() * this.totalWeight;
@@ -216,6 +251,21 @@ export class SlotMachine {
       }
     }
     return n;
+  }
+  /** Highest-paying *regular* symbol for 5-in-a-row (used for all-wild lines). */
+  private bestFiveSymbol(): SymbolId {
+    let best: SymbolId | null = null;
+    let bestPay = -Infinity;
+    for (const s of this.config.symbols) {
+      if (s.id === "FS") continue; // FS never pays as a line
+      const pay = this.config.payoutTable[s.id][5];
+      if (pay > bestPay) {
+        bestPay = pay;
+        best = s.id;
+      }
+    }
+    // fallback: first non-FS symbol
+    return best ?? this.config.symbols.find((s) => s.id !== "FS")!.id;
   }
 }
 
