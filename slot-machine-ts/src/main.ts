@@ -174,8 +174,10 @@ function showWins(lineWins: LineWin[]): void {
   overlaySvg.setAttribute("height", String(rect.height));
   overlaySvg.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
   overlaySvg.replaceChildren();
+  
 
   for (const w of lineWins) {
+    
     // glow all cells in the segment (works for diagonals too)
     const rStep = Math.sign(w.endRow - w.startRow);
     const cStep = Math.sign(w.endCol - w.startCol);
@@ -198,6 +200,7 @@ function showWins(lineWins: LineWin[]): void {
     line.setAttribute("class", "win-line");
     line.setAttribute("stroke", symbolColor[w.symbol]);
     overlaySvg.appendChild(line);
+    
   }
 }
 
@@ -239,6 +242,16 @@ async function animateColumnsThenResolve(
       };
       requestAnimationFrame(tick);
     });
+    for (let r = 0; r < ROWS; r++) {
+      cellEls[r][col].animate(
+        [
+          { transform: "translateY(0)" },
+          { transform: "translateY(-6px)" },
+          { transform: "translateY(0)" },
+        ],
+        { duration: 150, easing: "ease-out" }
+      );
+    }
 
     if (col < COLS - 1) {
       await new Promise((res) => setTimeout(res, delayBetween));
@@ -325,6 +338,7 @@ async function runBonusSession(freeSpins: number): Promise<void> {
 
   bonusActive = true;
   setDisabled(true);
+  
 
   const wilds: number[][] = Array.from({ length: ROWS }, () =>
     Array(COLS).fill(0)
@@ -399,6 +413,7 @@ async function runBonusSession(freeSpins: number): Promise<void> {
 
   setDisabled(false);
   bonusActive = false;
+  
 }
 
 function buildWinMask(lineWins: LineWin[]): boolean[][] {
@@ -439,6 +454,7 @@ function incrementWildsByMask(
 /* ---------------- Events ---------------- */
 async function onSpinClick(): Promise<void> {
   try {
+    
     setDisabled(true);
     clearAllEffects(); // <-- was clearWinEffects()
 

@@ -147,6 +147,24 @@ select {
   border-color: rgba(255, 226, 117, 0.9);
 }
 
+@keyframes win-pulse {
+  0% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scale(1.15);
+    filter: brightness(1.5);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+.win {
+  animation: win-pulse 400ms ease-in-out;
+}
+
 /* overlay sits on top of reels and stretches to the stage */
 .line-overlay {
   position: absolute;
@@ -369,3 +387,4 @@ select {
 .bonus-hud[hidden] {
   display: none !important;
 }
+
