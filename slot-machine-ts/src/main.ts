@@ -19,8 +19,6 @@ const paytableList = document.getElementById(
   "paytable-list"
 ) as HTMLUListElement;
 
-let bonusActive = false;
-
 const overlaySvg = document.querySelector<SVGSVGElement>("#line-overlay")!;
 const slotStage = document.getElementById("slot-stage") as HTMLDivElement;
 
@@ -333,7 +331,6 @@ function spawnNewWilds(wilds: number[][]): Array<[number, number]> {
 async function runBonusSession(freeSpins: number): Promise<void> {
   if (freeSpins <= 0) return;
 
-  bonusActive = true;
   setDisabled(true);
 
   const wilds: number[][] = Array.from({ length: ROWS }, () =>
@@ -408,7 +405,6 @@ async function runBonusSession(freeSpins: number): Promise<void> {
   };
 
   setDisabled(false);
-  bonusActive = false;
 }
 
 function buildWinMask(lineWins: LineWin[]): boolean[][] {
